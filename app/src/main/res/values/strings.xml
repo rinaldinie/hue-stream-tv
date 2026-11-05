@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Hue Stream TV</string>
+    <string name="accessibility_service_label">Hue Stream Auto-Sync Whitelist</string>
+    <string name="accessibility_service_description">Monitors active foreground applications to automatically pause and release Philips Hue lights when leaving whitelisted apps or entering the TV home screen.</string>
+    <string name="notification_channel_name">Screen Sync Service</string>
+    <string name="notification_channel_description">Active screen capture and Hue entertainment streaming</string>
+    <string name="notification_title">Hue Stream TV</string>
+    <string name="notification_syncing">Screen sync active</string>
+    <string name="notification_paused">Screen sync paused (app not whitelisted)</string>
+</resources>
