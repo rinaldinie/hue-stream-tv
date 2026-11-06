@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
@@ -32,6 +34,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import org.openhue.streamtv.MainActivity
 import org.openhue.streamtv.R
 import org.openhue.streamtv.hue.model.HueCredentials
@@ -60,6 +64,11 @@ class ScreenCaptureService : Service() {
 
     private var lightTargets: List<LightTarget> = emptyList()
     private var reusableBitmap: Bitmap? = null
+
+    @Volatile
+    private var isScreenOff = false
+    private var lastForegroundPackage = ""
+    private var screenReceiver: BroadcastReceiver? = null
 
     // Downscale resolution: 160x90 maintains 16:9 aspect ratio with negligible CPU usage on TV
     private val CAPTURE_WIDTH = 160
@@ -107,6 +116,64 @@ class ScreenCaptureService : Service() {
         backgroundHandler = Handler(handlerThread!!.looper)
 
         createNotificationChannel()
+        registerScreenReceiver()
+    }
+
+    private fun registerScreenReceiver() {
+        if (screenReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val action = intent?.action ?: return
+                when (action) {
+                    Intent.ACTION_SCREEN_OFF, Intent.ACTION_SHUTDOWN -> {
+                        Log.i(TAG, "Screen off or shutdown detected: releasing Hue lights")
+                        isScreenOff = true
+                        if (_isRunning.value) {
+                            val pendingResult = goAsync()
+                            serviceScope.launch(Dispatchers.IO) {
+                                try {
+                                    streamManager.pauseStream(releaseLights = true)
+                                    updateNotification(getString(R.string.notification_paused))
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to release lights on screen off: ${e.message}")
+                                } finally {
+                                    pendingResult.finish()
+                                }
+                            }
+                        }
+                    }
+                    Intent.ACTION_SCREEN_ON -> {
+                        Log.i(TAG, "Screen on detected: restoring sync if app is whitelisted")
+                        isScreenOff = false
+                        if (_isRunning.value) {
+                            lastForegroundPackage = ""
+                            val pendingResult = goAsync()
+                            serviceScope.launch(Dispatchers.IO) {
+                                try {
+                                    delay(500)
+                                    if (!repository.isAutoReleaseEnabled()) {
+                                        _isPausedByWhitelist.value = false
+                                        streamManager.resumeStream()
+                                        updateNotification(getString(R.string.notification_syncing))
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to resume stream on screen on: ${e.message}")
+                                } finally {
+                                    pendingResult.finish()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SHUTDOWN)
+        }
+        registerReceiver(receiver, filter)
+        screenReceiver = receiver
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -205,7 +272,7 @@ class ScreenCaptureService : Service() {
         imageReader?.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
             try {
-                if (_isPausedByWhitelist.value) {
+                if (_isPausedByWhitelist.value || isScreenOff) {
                     return@setOnImageAvailableListener
                 }
                 if (frameCounter < 3L) {
@@ -272,6 +339,7 @@ class ScreenCaptureService : Service() {
 
     fun handleForegroundPackageChange(packageName: String, isWhitelisted: Boolean) {
         if (!_isRunning.value) return
+        if (isScreenOff) return
         if (!repository.isAutoReleaseEnabled()) return
 
         if (!isWhitelisted) {
@@ -301,9 +369,9 @@ class ScreenCaptureService : Service() {
         appMonitorJob?.cancel()
         appMonitorJob = serviceScope.launch {
             val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
-            var lastPackage = ""
             while (isActive) {
                 delay(800)
+                if (isScreenOff) continue
                 if (!repository.isAutoReleaseEnabled()) {
                     if (_isPausedByWhitelist.value) {
                         _isPausedByWhitelist.value = false
@@ -329,8 +397,8 @@ class ScreenCaptureService : Service() {
                             }
                         }
                     }
-                    if (currentApp != null && currentApp.isNotBlank() && currentApp != lastPackage) {
-                        lastPackage = currentApp
+                    if (currentApp != null && currentApp.isNotBlank() && currentApp != lastForegroundPackage) {
+                        lastForegroundPackage = currentApp
                         val isWhitelisted = whitelistManager.isPackageWhitelisted(currentApp)
                         handleForegroundPackageChange(currentApp, isWhitelisted)
                     }
@@ -404,8 +472,17 @@ class ScreenCaptureService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        screenReceiver?.let {
+            try { unregisterReceiver(it) } catch (_: Exception) {}
+            screenReceiver = null
+        }
         stopStreaming()
         activeInstance = null
+        runBlocking(Dispatchers.IO) {
+            withTimeoutOrNull(1500) {
+                streamManager.stopStream()
+            }
+        }
         serviceScope.cancel()
         handlerThread?.quitSafely()
     }
