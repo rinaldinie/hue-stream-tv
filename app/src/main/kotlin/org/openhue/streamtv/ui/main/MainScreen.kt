@@ -659,20 +659,12 @@ fun BrightnessSliderCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "Light Brightness",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = if (isFocused) "← / → to adjust" else "",
-                        fontSize = 11.sp,
-                        color = Color(0xFF00E5FF)
-                    )
-                }
+                Text(
+                    text = "Light Brightness",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
+                )
 
                 Box(
                     modifier = Modifier
@@ -743,14 +735,6 @@ fun BrightnessSliderCard(
                     Text(text = "+", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = "Adjust with remote ← / → arrow keys, or click/drag with mouse.",
-                fontSize = 11.sp,
-                color = Color(0xFF757575)
-            )
         }
     }
 }
