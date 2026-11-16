@@ -10,11 +10,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.openhue.streamtv.hue.model.HueCredentials
 import org.openhue.streamtv.hue.model.PairingState
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
+import org.openhue.streamtv.hue.network.HueHttpClient
 
 class HueAuth {
     private val TAG = "HueAuth"
@@ -66,31 +62,21 @@ class HueAuth {
     }.flowOn(Dispatchers.IO)
 
     private fun sendPairRequest(bridgeIp: String): JSONObject? {
-        var conn: HttpURLConnection? = null
         try {
-            val url = URL("http://$bridgeIp/api")
-            conn = url.openConnection() as HttpURLConnection
-            conn.connectTimeout = 2000
-            conn.readTimeout = 2000
-            conn.requestMethod = "POST"
-            conn.doOutput = true
-            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-
             val payload = JSONObject().apply {
-                put("devicetype", "hue_stream_tv#shield")
+                put("devicetype", "HueStreamTV#AndroidTV")
                 put("generateclientkey", true)
             }
 
-            val writer = OutputStreamWriter(conn.outputStream, "UTF-8")
-            writer.write(payload.toString())
-            writer.flush()
-            writer.close()
+            val jsonStr = HueHttpClient.executePostWithFallback(
+                bridgeIp = bridgeIp,
+                path = "/api",
+                payload = payload.toString(),
+                connectTimeout = 2000,
+                readTimeout = 2000
+            )
 
-            if (conn.responseCode == 200) {
-                val reader = BufferedReader(InputStreamReader(conn.inputStream))
-                val jsonStr = reader.readText()
-                reader.close()
-
+            if (jsonStr != null) {
                 val jsonArray = JSONArray(jsonStr)
                 if (jsonArray.length() > 0) {
                     return jsonArray.getJSONObject(0)
@@ -98,8 +84,6 @@ class HueAuth {
             }
         } catch (e: Exception) {
             Log.d(TAG, "Pairing request error: ${e.message}")
-        } finally {
-            conn?.disconnect()
         }
         return null
     }

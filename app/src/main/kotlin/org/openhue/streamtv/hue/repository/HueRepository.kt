@@ -8,11 +8,7 @@ import org.json.JSONObject
 import org.openhue.streamtv.hue.model.HueCredentials
 import org.openhue.streamtv.hue.model.HueGroup
 import org.openhue.streamtv.hue.model.LightLocation
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
+import org.openhue.streamtv.hue.network.HueHttpClient
 
 class HueRepository(private val context: Context) {
     private val TAG = "HueRepository"
@@ -96,19 +92,15 @@ class HueRepository(private val context: Context) {
             )
         }
         val groups = mutableListOf<HueGroup>()
-        var conn: HttpURLConnection? = null
         try {
-            val url = URL("http://${creds.bridgeIp}/api/${creds.username}/groups")
-            conn = url.openConnection() as HttpURLConnection
-            conn.connectTimeout = 3000
-            conn.readTimeout = 3000
-            conn.requestMethod = "GET"
+            val jsonStr = HueHttpClient.executeGetWithFallback(
+                bridgeIp = creds.bridgeIp,
+                path = "/api/${creds.username}/groups",
+                connectTimeout = 3000,
+                readTimeout = 3000
+            )
 
-            if (conn.responseCode == 200) {
-                val reader = BufferedReader(InputStreamReader(conn.inputStream))
-                val jsonStr = reader.readText()
-                reader.close()
-
+            if (jsonStr != null) {
                 val root = JSONObject(jsonStr)
                 val keys = root.keys()
                 while (keys.hasNext()) {
@@ -157,8 +149,6 @@ class HueRepository(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching groups: ${e.message}")
-        } finally {
-            conn?.disconnect()
         }
         groups
     }
@@ -167,16 +157,7 @@ class HueRepository(private val context: Context) {
         if (creds.username == "demo-token" || creds.bridgeIp == "127.0.0.1") {
             return@withContext true
         }
-        var conn: HttpURLConnection? = null
         try {
-            val url = URL("http://${creds.bridgeIp}/api/${creds.username}/groups/$groupId")
-            conn = url.openConnection() as HttpURLConnection
-            conn.connectTimeout = 3000
-            conn.readTimeout = 3000
-            conn.requestMethod = "PUT"
-            conn.doOutput = true
-            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-
             val payload = JSONObject().apply {
                 val streamObj = JSONObject().apply {
                     put("active", active)
@@ -184,17 +165,16 @@ class HueRepository(private val context: Context) {
                 put("stream", streamObj)
             }
 
-            val writer = OutputStreamWriter(conn.outputStream, "UTF-8")
-            writer.write(payload.toString())
-            writer.flush()
-            writer.close()
-
-            return@withContext (conn.responseCode == 200)
+            return@withContext HueHttpClient.executePutWithFallback(
+                bridgeIp = creds.bridgeIp,
+                path = "/api/${creds.username}/groups/$groupId",
+                payload = payload.toString(),
+                connectTimeout = 3000,
+                readTimeout = 3000
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Error setting stream active=$active: ${e.message}")
             false
-        } finally {
-            conn?.disconnect()
         }
     }
 }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.openhue.streamtv.hue.model.HueBridge
+import org.openhue.streamtv.hue.network.HueHttpClient
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.DatagramPacket
@@ -152,19 +153,9 @@ class HueDiscovery(private val context: Context) {
     }
 
     suspend fun verifyBridge(ip: String): HueBridge? = withContext(Dispatchers.IO) {
-        var conn: HttpURLConnection? = null
         try {
-            val url = URL("http://$ip/api/config")
-            conn = url.openConnection() as HttpURLConnection
-            conn.connectTimeout = 2500
-            conn.readTimeout = 2500
-            conn.requestMethod = "GET"
-
-            if (conn.responseCode == 200) {
-                val reader = BufferedReader(InputStreamReader(conn.inputStream))
-                val jsonStr = reader.readText()
-                reader.close()
-
+            val jsonStr = HueHttpClient.executeGetWithFallback(ip, "/api/config", connectTimeout = 2500, readTimeout = 2500)
+            if (jsonStr != null) {
                 val json = org.json.JSONObject(jsonStr)
                 val bridgeId = json.optString("bridgeid", "")
                 val name = json.optString("name", "Philips Hue Bridge")
@@ -178,8 +169,6 @@ class HueDiscovery(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.d(TAG, "Bridge verification failed for $ip: ${e.message}")
-        } finally {
-            conn?.disconnect()
         }
         null
     }
